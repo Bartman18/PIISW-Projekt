@@ -1,7 +1,7 @@
-import { Injectable, computed, effect, signal } from '@angular/core';
-import { Role } from '../models/ticket.model';
+import { Injectable, computed, effect, signal } from "@angular/core";
+import { Role } from "../models/ticket.model";
 
-const STORAGE_KEY = 'piisw.user';
+const STORAGE_KEY = "piisw.user";
 
 export interface AuthUser {
   username: string;
@@ -14,21 +14,31 @@ interface MockAccount extends AuthUser {
 }
 
 const MOCK_ACCOUNTS: readonly MockAccount[] = [
-  { username: 'pasazer', password: 'pasazer', displayName: 'Anna Kowalska', role: 'passenger' },
-  { username: 'bileter', password: 'bileter', displayName: 'Jan Nowak', role: 'inspector' }
+  {
+    username: "pasazer",
+    password: "pasazer",
+    displayName: "Anna Kowalska",
+    role: "passenger",
+  },
+  {
+    username: "bileter",
+    password: "bileter",
+    displayName: "Jan Nowak",
+    role: "inspector",
+  },
 ];
 
 function readInitialUser(): AuthUser | null {
-  if (typeof sessionStorage === 'undefined') return null;
+  if (typeof sessionStorage === "undefined") return null;
   const raw = sessionStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as AuthUser;
     if (
       parsed &&
-      typeof parsed.username === 'string' &&
-      typeof parsed.displayName === 'string' &&
-      (parsed.role === 'passenger' || parsed.role === 'inspector')
+      typeof parsed.username === "string" &&
+      typeof parsed.displayName === "string" &&
+      (parsed.role === "passenger" || parsed.role === "inspector")
     ) {
       return parsed;
     }
@@ -38,7 +48,7 @@ function readInitialUser(): AuthUser | null {
   return null;
 }
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class AuthService {
   private readonly _user = signal<AuthUser | null>(readInitialUser());
   readonly user = this._user.asReadonly();
@@ -47,7 +57,7 @@ export class AuthService {
   constructor() {
     effect(() => {
       const user = this._user();
-      if (typeof sessionStorage === 'undefined') return;
+      if (typeof sessionStorage === "undefined") return;
       if (user) {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
       } else {
@@ -58,13 +68,14 @@ export class AuthService {
 
   login(username: string, password: string): AuthUser | null {
     const account = MOCK_ACCOUNTS.find(
-      (a) => a.username === username.trim().toLowerCase() && a.password === password
+      (a) =>
+        a.username === username.trim().toLowerCase() && a.password === password,
     );
     if (!account) return null;
     const user: AuthUser = {
       username: account.username,
       displayName: account.displayName,
-      role: account.role
+      role: account.role,
     };
     this._user.set(user);
     return user;
