@@ -20,7 +20,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/piisw
       DB_USERNAME: piisw
       DB_PASSWORD: piisw
-      JWT_SECRET: 11000011101110000100101010011111
+      JWT_SECRET: "31530584-9fa4-4131-baaf-4a240eb098b5-d9c8b1e5e7a-4c8b-4e5a-9c1b-2f3e5a6b7c8d"
     ports:
       - "8081:8081"
     depends_on:
