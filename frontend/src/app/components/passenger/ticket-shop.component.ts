@@ -1,6 +1,7 @@
-import { Component, computed, inject, signal } from "@angular/core";
+import { Component, OnInit, computed, inject, signal } from "@angular/core";
 import { DecimalPipe } from "@angular/common";
-import { ApiService } from "../../services/api.service";
+import { firstValueFrom } from "rxjs";
+import { apiErrorMessage } from "../../services/api.service";
 import { WalletService } from "../../services/wallet.service";
 import { TicketService } from "../../services/ticket.service";
 import { TicketCategory, TicketDefinition } from "../../models/ticket.model";
@@ -81,8 +82,7 @@ import { TicketCategory, TicketDefinition } from "../../models/ticket.model";
     </section>
   `,
 })
-export class TicketShopComponent {
-  private readonly api = inject(ApiService);
+export class TicketShopComponent implements OnInit {
   private readonly tickets = inject(TicketService);
   readonly wallet = inject(WalletService);
 
@@ -94,14 +94,19 @@ export class TicketShopComponent {
   readonly notice = signal<string | null>(null);
   readonly noticeKind = signal<"success" | "error">("success");
 
+  ngOnInit(): void {
+    this.tickets.loadCatalog();
+    this.wallet.refresh();
+  }
+
   async buy(def: TicketDefinition): Promise<void> {
     try {
-      const ticket = await this.api.purchaseTicket(def.id);
+      const ticket = await firstValueFrom(this.tickets.purchase(def.id));
       this.noticeKind.set("success");
       this.notice.set(`Zakupiono bilet ${ticket.name} (${ticket.id}).`);
     } catch (err) {
       this.noticeKind.set("error");
-      this.notice.set(err instanceof Error ? err.message : "Błąd zakupu");
+      this.notice.set(apiErrorMessage(err, "Błąd zakupu"));
     }
     setTimeout(() => this.notice.set(null), 4000);
   }

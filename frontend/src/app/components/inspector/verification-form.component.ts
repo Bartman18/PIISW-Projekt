@@ -1,8 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ApiService } from '../../services/api.service';
-import { TicketService } from '../../services/ticket.service';
+import { ApiService, apiErrorMessage } from '../../services/api.service';
 import { VerificationResult } from '../../models/ticket.model';
 
 @Component({
@@ -50,28 +49,6 @@ import { VerificationResult } from '../../models/ticket.model';
             Sprawdź bilet
           }
         </button>
-
-        @if (tickets.tickets().length > 0) {
-          <details class="text-xs text-slate-600">
-            <summary class="cursor-pointer hover:text-slate-800">
-              Pokaż ID dostępnych biletów (demo)
-            </summary>
-            <ul class="mt-2 font-mono space-y-0.5">
-              @for (t of tickets.tickets(); track t.id) {
-                <li>
-                  <button
-                    type="button"
-                    (click)="ticketId = t.id"
-                    class="text-brand-700 hover:underline"
-                  >
-                    {{ t.id }}
-                  </button>
-                  – {{ t.type }} ({{ t.status }})
-                </li>
-              }
-            </ul>
-          </details>
-        }
       </form>
 
       <div class="flex">
@@ -124,7 +101,6 @@ import { VerificationResult } from '../../models/ticket.model';
 })
 export class VerificationFormComponent {
   private readonly api = inject(ApiService);
-  readonly tickets = inject(TicketService);
 
   ticketId = '';
   vehicleId = '';
@@ -148,7 +124,7 @@ export class VerificationFormComponent {
     } catch (err) {
       this.result.set({
         valid: false,
-        message: err instanceof Error ? err.message : 'Błąd weryfikacji'
+        message: apiErrorMessage(err, 'Błąd weryfikacji')
       });
     } finally {
       this.pending.set(false);

@@ -1,7 +1,8 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { WalletService } from '../../services/wallet.service';
 import { PaymentService } from '../../services/payment.service';
+import { apiErrorMessage } from '../../services/api.service';
 
 @Component({
   selector: 'app-wallet',
@@ -32,17 +33,20 @@ import { PaymentService } from '../../services/payment.service';
   `,
   host: { class: 'block' }
 })
-export class WalletComponent {
+export class WalletComponent implements OnInit {
   readonly wallet = inject(WalletService);
   readonly payment = inject(PaymentService);
   readonly lastTopUp = signal<string | null>(null);
 
-  async topUp(): Promise<void> {
+  ngOnInit(): void {
+    this.wallet.refresh();
+  }
+
+  topUp(): void {
     const amount = 20;
-    const result = await this.payment.process(amount, 'Łączenie z bankiem...');
-    if (result.success) {
-      this.wallet.topUp(amount);
-      this.lastTopUp.set(`Doładowano ${amount.toFixed(2)} PLN · ${result.transactionId}`);
-    }
+    this.wallet.topUp(amount).subscribe({
+      next: () => this.lastTopUp.set(`Doładowano ${amount.toFixed(2)} PLN`),
+      error: (err) => this.lastTopUp.set(apiErrorMessage(err, 'Doładowanie nie powiodło się'))
+    });
   }
 }

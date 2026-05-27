@@ -1,96 +1,69 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, of, throwError } from 'rxjs';
-import { delay } from 'rxjs/operators';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable } from 'rxjs';
 import { Ticket, TicketDefinition, VerificationResult } from '../models/ticket.model';
-import { PaymentService } from './payment.service';
-import { TicketService } from './ticket.service';
-import { WalletService } from './wallet.service';
+import { API_BASE_URL } from './api.constants';
+
+export interface LoginResponse {
+  token: string;
+  username: string;
+  displayName: string;
+  role: 'PASSENGER' | 'INSPECTOR';
+}
+
+export interface WalletResponse {
+  balance: number;
+}
+
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof HttpErrorResponse) {
+    const body = err.error;
+    if (body && typeof body === 'object' && typeof body.message === 'string') {
+      return body.message;
+    }
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private readonly tickets = inject(TicketService);
-  private readonly wallet = inject(WalletService);
-  private readonly payment = inject(PaymentService);
+  private readonly http = inject(HttpClient);
 
-  purchaseTicket(ticketTypeId: string): Promise<Ticket> {
-    const def = this.tickets.catalog().find((c) => c.id === ticketTypeId);
-    if (!def) return Promise.reject(new Error('Nieznany typ biletu'));
-    if (!this.wallet.canAfford(def.price)) {
-      return Promise.reject(new Error('Niewystarczające saldo'));
-    }
-    return this.payment.process(def.price, 'Przetwarzanie zakupu biletu...').then((res) => {
-      if (!res.success) throw new Error('Płatność odrzucona');
-      this.wallet.debit(def.price);
-      return this.tickets.createFromDefinition(def);
-    });
+  login(username: string, password: string): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${API_BASE_URL}/auth/login`, { username, password });
+  }
+
+  getWallet(): Observable<WalletResponse> {
+    return this.http.get<WalletResponse>(`${API_BASE_URL}/passenger/wallet`);
+  }
+
+  topUp(amount: number): Observable<WalletResponse> {
+    return this.http.post<WalletResponse>(`${API_BASE_URL}/passenger/wallet/topup`, { amount });
+  }
+
+  getCatalog(): Observable<TicketDefinition[]> {
+    return this.http.get<TicketDefinition[]>(`${API_BASE_URL}/catalog`);
+  }
+
+  getTickets(): Observable<Ticket[]> {
+    return this.http.get<Ticket[]>(`${API_BASE_URL}/passenger/tickets`);
+  }
+
+  purchaseTicket(definitionId: string): Observable<Ticket> {
+    return this.http.post<Ticket>(`${API_BASE_URL}/passenger/tickets/purchase`, { definitionId });
   }
 
   validateTicket(ticketId: string, vehicleId?: string): Observable<Ticket> {
-    const updated = this.tickets.validate(ticketId, vehicleId);
-    if (!updated) {
-      return throwError(() => new Error('Biletu nie można aktywować')).pipe(delay(400));
-    }
-    return of(updated).pipe(delay(400));
+    return this.http.post<Ticket>(
+      `${API_BASE_URL}/passenger/tickets/${ticketId}/validate`,
+      { vehicleId: vehicleId ?? null }
+    );
   }
 
   verifyTicket(ticketId: string, vehicleId: string): Observable<VerificationResult> {
-    const ticket = this.tickets.findById(ticketId);
-    if (!ticket) {
-      return of({ valid: false, message: `Bilet ${ticketId} nie istnieje w systemie.` }).pipe(
-        delay(500)
-      );
-    }
-    const result = this.evaluate(ticket, vehicleId);
-    return of({ ...result, ticket }).pipe(delay(500));
-  }
-
-  getCatalog(): TicketDefinition[] {
-    return this.tickets.catalog();
-  }
-
-  private evaluate(ticket: Ticket, vehicleId: string): VerificationResult {
-    const now = Date.now();
-    switch (ticket.type) {
-      case 'okresowy': {
-        if (ticket.status !== 'validated' || !ticket.validUntil) {
-          return { valid: false, message: 'Bilet okresowy nie został aktywowany.' };
-        }
-        if (now <= ticket.validUntil) {
-          return {
-            valid: true,
-            message: `Bilet okresowy ważny do ${new Date(ticket.validUntil).toLocaleString('pl-PL')}.`
-          };
-        }
-        return { valid: false, message: 'Bilet okresowy stracił ważność.' };
-      }
-      case 'jednorazowy': {
-        if (ticket.status !== 'validated') {
-          return { valid: false, message: 'Bilet jednorazowy nie został skasowany.' };
-        }
-        if (ticket.vehicleId !== vehicleId) {
-          return {
-            valid: false,
-            message: `Bilet skasowany w innym pojeździe (${ticket.vehicleId ?? 'brak'}).`
-          };
-        }
-        return { valid: true, message: 'Bilet jednorazowy ważny w tym pojeździe.' };
-      }
-      case 'czasowy': {
-        if (ticket.status !== 'validated' || !ticket.validUntil) {
-          return { valid: false, message: 'Bilet czasowy nie został skasowany.' };
-        }
-        if (now <= ticket.validUntil) {
-          const remainingMin = Math.ceil((ticket.validUntil - now) / 60000);
-          return {
-            valid: true,
-            message: `Bilet czasowy ważny do ${new Date(ticket.validUntil).toLocaleString('pl-PL')} (jeszcze ${remainingMin} min).`
-          };
-        }
-        return {
-          valid: false,
-          message: `Bilet czasowy stracił ważność (${new Date(ticket.validUntil).toLocaleString('pl-PL')}).`
-        };
-      }
-    }
+    return this.http.get<VerificationResult>(`${API_BASE_URL}/inspector/verify`, {
+      params: { ticketId, vehicleId }
+    });
   }
 }

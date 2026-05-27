@@ -1,109 +1,102 @@
 import { TestBed } from '@angular/core/testing';
-import { AuthService } from './auth.service';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { AuthService, AuthUser } from './auth.service';
+import { API_BASE_URL } from './api.constants';
 
-const STORAGE_KEY = 'piisw.user';
+const STORAGE_KEY = 'piisw.session';
+const LOGIN_URL = `${API_BASE_URL}/auth/login`;
 
 describe('AuthService', () => {
+  let service: AuthService;
+  let httpMock: HttpTestingController;
+
   beforeEach(() => {
     sessionStorage.clear();
-    TestBed.configureTestingModule({});
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()]
+    });
+    service = TestBed.inject(AuthService);
+    httpMock = TestBed.inject(HttpTestingController);
   });
 
-  function getService(): AuthService {
-    return TestBed.inject(AuthService);
-  }
+  afterEach(() => httpMock.verify());
 
   it('starts logged out', () => {
-    const service = getService();
     expect(service.user()).toBeNull();
     expect(service.role()).toBeNull();
+    expect(service.token()).toBeNull();
   });
 
-  describe('login', () => {
-    it('logs in a passenger with correct credentials', () => {
-      const service = getService();
-      const user = service.login('pasazer', 'pasazer');
-      expect(user).not.toBeNull();
-      expect(user?.role).toBe('passenger');
-      expect(service.user()?.username).toBe('pasazer');
-      expect(service.is('passenger')).toBeTrue();
-      expect(service.is('inspector')).toBeFalse();
-    });
+  it('logs in, stores the token and lowercases the role', () => {
+    let user: AuthUser | undefined;
+    service.login('  PaSaZeR  ', 'pasazer').subscribe((u) => (user = u));
 
-    it('logs in an inspector with correct credentials', () => {
-      const service = getService();
-      const user = service.login('bileter', 'bileter');
-      expect(user?.role).toBe('inspector');
-      expect(service.role()).toBe('inspector');
-    });
+    const req = httpMock.expectOne(LOGIN_URL);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ username: 'PaSaZeR', password: 'pasazer' });
+    req.flush({ token: 'jwt-1', username: 'pasazer', displayName: 'Anna Kowalska', role: 'PASSENGER' });
 
-    it('is case-insensitive on the username', () => {
-      const service = getService();
-      const user = service.login('  PaSaZeR  ', 'pasazer');
-      expect(user).not.toBeNull();
-      expect(user?.username).toBe('pasazer');
-    });
-
-    it('rejects a wrong password', () => {
-      const service = getService();
-      const user = service.login('pasazer', 'wrong');
-      expect(user).toBeNull();
-      expect(service.user()).toBeNull();
-    });
-
-    it('rejects an unknown account', () => {
-      const service = getService();
-      expect(service.login('admin', 'admin')).toBeNull();
-    });
+    expect(user?.role).toBe('passenger');
+    expect(service.token()).toBe('jwt-1');
+    expect(service.user()?.username).toBe('pasazer');
+    expect(service.is('passenger')).toBeTrue();
+    expect(service.is('inspector')).toBeFalse();
   });
 
-  describe('persistence', () => {
-    it('persists the logged-in user to sessionStorage', () => {
-      const service = getService();
-      service.login('pasazer', 'pasazer');
-      TestBed.tick();
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      expect(raw).not.toBeNull();
-      expect(JSON.parse(raw!)).toEqual(
-        jasmine.objectContaining({ username: 'pasazer', role: 'passenger' })
-      );
-    });
+  it('persists the session to sessionStorage', () => {
+    service.login('bileter', 'bileter').subscribe();
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ token: 'jwt-2', username: 'bileter', displayName: 'Jan Nowak', role: 'INSPECTOR' });
 
-    it('restores the user from sessionStorage on init', () => {
-      sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ username: 'bileter', displayName: 'Jan Nowak', role: 'inspector' })
-      );
-      const service = getService();
-      expect(service.user()?.username).toBe('bileter');
-      expect(service.role()).toBe('inspector');
-    });
-
-    it('ignores corrupted sessionStorage data', () => {
-      sessionStorage.setItem(STORAGE_KEY, '{not json');
-      const service = getService();
-      expect(service.user()).toBeNull();
-    });
-
-    it('ignores stored data with an invalid role', () => {
-      sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ username: 'x', displayName: 'X', role: 'admin' })
-      );
-      const service = getService();
-      expect(service.user()).toBeNull();
-    });
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw!)).toEqual(
+      jasmine.objectContaining({
+        token: 'jwt-2',
+        user: jasmine.objectContaining({ username: 'bileter', role: 'inspector' })
+      })
+    );
   });
 
-  describe('logout', () => {
-    it('clears the user and the persisted entry', () => {
-      const service = getService();
-      service.login('pasazer', 'pasazer');
-      TestBed.tick();
-      service.logout();
-      TestBed.tick();
-      expect(service.user()).toBeNull();
-      expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  it('restores a stored session on init', () => {
+    TestBed.resetTestingModule();
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        token: 'jwt-3',
+        user: { username: 'bileter', displayName: 'Jan Nowak', role: 'inspector' }
+      })
+    );
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()]
     });
+    const restored = TestBed.inject(AuthService);
+    expect(restored.user()?.username).toBe('bileter');
+    expect(restored.token()).toBe('jwt-3');
+  });
+
+  it('rejects a wrong password and stays logged out', () => {
+    let errored = false;
+    service.login('pasazer', 'wrong').subscribe({ error: () => (errored = true) });
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ message: 'Błędny login lub hasło' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(errored).toBeTrue();
+    expect(service.user()).toBeNull();
+    expect(service.token()).toBeNull();
+  });
+
+  it('logs out and clears the persisted session', () => {
+    service.login('pasazer', 'pasazer').subscribe();
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ token: 'jwt', username: 'pasazer', displayName: 'Anna Kowalska', role: 'PASSENGER' });
+
+    service.logout();
+    expect(service.user()).toBeNull();
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });

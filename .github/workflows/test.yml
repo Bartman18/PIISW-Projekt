@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  ci:
-    name: Test & build
+  frontend:
+    name: Frontend – test & build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -30,5 +30,28 @@ jobs:
       - name: Run unit tests
         run: npm run test:ci
 
-      - name: Build 
+      - name: Build
         run: npm run build
+
+  backend:
+    name: Backend – test & package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Run tests and package
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -B verify

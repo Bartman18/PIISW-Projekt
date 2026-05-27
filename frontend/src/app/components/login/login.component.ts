@@ -53,15 +53,19 @@ import { AuthService } from '../../services/auth.service';
 
           <button
             type="submit"
-            [disabled]="f.invalid"
+            [disabled]="f.invalid || pending()"
             class="w-full bg-brand-700 hover:bg-brand-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-md transition"
           >
-            Zaloguj się
+            @if (pending()) {
+              Logowanie...
+            } @else {
+              Zaloguj się
+            }
           </button>
         </form>
 
         <div class="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-500">
-          <p class="font-semibold mb-1">Konta testowe (mock):</p>
+          <p class="font-semibold mb-1">Konta testowe:</p>
           <ul class="space-y-0.5">
             <li><code>pasazer</code> / <code>pasazer</code> — pasażer</li>
             <li><code>bileter</code> / <code>bileter</code> — bileter</li>
@@ -78,14 +82,21 @@ export class LoginComponent {
   username = '';
   password = '';
   readonly error = signal<string | null>(null);
+  readonly pending = signal(false);
 
   submit(): void {
-    const user = this.auth.login(this.username, this.password);
-    if (!user) {
-      this.error.set('Nieprawidłowy login lub hasło.');
-      return;
-    }
+    if (this.pending()) return;
+    this.pending.set(true);
     this.error.set(null);
-    this.router.navigateByUrl(user.role === 'passenger' ? '/passenger' : '/inspector');
+    this.auth.login(this.username, this.password).subscribe({
+      next: (user) => {
+        this.pending.set(false);
+        this.router.navigateByUrl(user.role === 'passenger' ? '/passenger' : '/inspector');
+      },
+      error: () => {
+        this.pending.set(false);
+        this.error.set('Nieprawidłowy login lub hasło.');
+      }
+    });
   }
 }

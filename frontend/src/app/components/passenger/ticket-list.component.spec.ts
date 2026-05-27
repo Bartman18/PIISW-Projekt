@@ -1,9 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Observable, of, throwError } from 'rxjs';
 import { TicketListComponent } from './ticket-list.component';
-import { ApiService } from '../../services/api.service';
 import { TicketService } from '../../services/ticket.service';
-import { Ticket, TicketDefinition } from '../../models/ticket.model';
+import { Ticket } from '../../models/ticket.model';
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -19,18 +20,32 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   };
 }
 
+class FakeTicketService {
+  readonly tickets = signal<Ticket[]>([]);
+  readonly loadTickets = jasmine.createSpy('loadTickets');
+  readonly validate = jasmine
+    .createSpy('validate')
+    .and.returnValue(of(makeTicket()) as Observable<Ticket>);
+}
+
 describe('TicketListComponent', () => {
   let fixture: ComponentFixture<TicketListComponent>;
   let component: TicketListComponent;
-  let api: ApiService;
-  let ticketsService: TicketService;
+  let tickets: FakeTicketService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [TicketListComponent] });
+    tickets = new FakeTicketService();
+    TestBed.configureTestingModule({
+      imports: [TicketListComponent],
+      providers: [{ provide: TicketService, useValue: tickets }]
+    });
     fixture = TestBed.createComponent(TicketListComponent);
     component = fixture.componentInstance;
-    api = TestBed.inject(ApiService);
-    ticketsService = TestBed.inject(TicketService);
+  });
+
+  it('loads tickets on init', () => {
+    fixture.detectChanges();
+    expect(tickets.loadTickets).toHaveBeenCalled();
   });
 
   it('shows the empty-state message when there are no tickets', () => {
@@ -41,8 +56,8 @@ describe('TicketListComponent', () => {
 
   describe('jednorazowy', () => {
     it('opens the vehicle-input form when "Skasuj bilet" is clicked', () => {
-      const def = ticketsService.catalog().find((d) => d.id === 'def-single-n') as TicketDefinition;
-      const ticket = ticketsService.createFromDefinition(def);
+      const ticket = makeTicket();
+      tickets.tickets.set([ticket]);
       fixture.detectChanges();
 
       component.startValidation(ticket);
@@ -53,26 +68,23 @@ describe('TicketListComponent', () => {
     });
 
     it('does nothing when confirmValidation is called without a vehicleId', async () => {
-      const def = ticketsService.catalog().find((d) => d.id === 'def-single-n') as TicketDefinition;
-      const ticket = ticketsService.createFromDefinition(def);
-      const validateSpy = spyOn(api, 'validateTicket');
+      const ticket = makeTicket();
       component.startValidation(ticket);
       component.vehicleInput = '   ';
       await component.confirmValidation(ticket);
-      expect(validateSpy).not.toHaveBeenCalled();
+      expect(tickets.validate).not.toHaveBeenCalled();
     });
 
     it('shows a success notice after a confirmed validation', async () => {
-      const def = ticketsService.catalog().find((d) => d.id === 'def-single-n') as TicketDefinition;
-      const ticket = ticketsService.createFromDefinition(def);
+      const ticket = makeTicket();
       const validated = makeTicket({ id: ticket.id, status: 'validated', vehicleId: 'BUS-9' });
-      spyOn(api, 'validateTicket').and.returnValue(of(validated));
+      tickets.validate.and.returnValue(of(validated));
 
       component.startValidation(ticket);
       component.vehicleInput = 'BUS-9';
       await component.confirmValidation(ticket);
 
-      expect(api.validateTicket).toHaveBeenCalledWith(ticket.id, 'BUS-9');
+      expect(tickets.validate).toHaveBeenCalledWith(ticket.id, 'BUS-9');
       expect(component.noticeKind()).toBe('success');
       expect(component.notice()).toContain('BUS-9');
       expect(component.validatingId()).toBeNull();
@@ -80,14 +92,14 @@ describe('TicketListComponent', () => {
 
     it('shows an error notice when validation fails', async () => {
       const ticket = makeTicket();
-      spyOn(api, 'validateTicket').and.returnValue(
-        throwError(() => new Error('Biletu nie można aktywować'))
+      tickets.validate.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 409, error: { message: 'Bilet został już skasowany' } }))
       );
       component.startValidation(ticket);
       component.vehicleInput = 'TRAM-1';
       await component.confirmValidation(ticket);
       expect(component.noticeKind()).toBe('error');
-      expect(component.notice()).toBe('Biletu nie można aktywować');
+      expect(component.notice()).toBe('Bilet został już skasowany');
     });
 
     it('clears the form when cancelValidation is called', () => {
@@ -101,16 +113,15 @@ describe('TicketListComponent', () => {
 
   describe('czasowy / okresowy', () => {
     it('activates a czasowy ticket without requiring a vehicleId', async () => {
-      const def = ticketsService.catalog().find((d) => d.id === 'def-time-30m-n') as TicketDefinition;
-      const ticket = ticketsService.createFromDefinition(def);
+      const ticket = makeTicket({ type: 'czasowy' });
       const validUntil = Date.now() + 30 * 60_000;
-      spyOn(api, 'validateTicket').and.returnValue(
+      tickets.validate.and.returnValue(
         of(makeTicket({ id: ticket.id, type: 'czasowy', status: 'validated', validUntil }))
       );
 
       await component.activate(ticket);
 
-      expect(api.validateTicket).toHaveBeenCalledWith(ticket.id);
+      expect(tickets.validate).toHaveBeenCalledWith(ticket.id);
       expect(component.noticeKind()).toBe('success');
       expect(component.notice()).toContain('aktywowany');
       expect(component.pendingId()).toBeNull();

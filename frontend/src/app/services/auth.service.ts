@@ -1,7 +1,10 @@
-import { Injectable, computed, effect, signal } from "@angular/core";
-import { Role } from "../models/ticket.model";
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { Observable } from 'rxjs';
+import { map, tap } from 'rxjs/operators';
+import { Role } from '../models/ticket.model';
+import { ApiService } from './api.service';
 
-const STORAGE_KEY = "piisw.user";
+const STORAGE_KEY = 'piisw.session';
 
 export interface AuthUser {
   username: string;
@@ -9,36 +12,24 @@ export interface AuthUser {
   role: Role;
 }
 
-interface MockAccount extends AuthUser {
-  password: string;
+interface StoredSession {
+  token: string;
+  user: AuthUser;
 }
 
-const MOCK_ACCOUNTS: readonly MockAccount[] = [
-  {
-    username: "pasazer",
-    password: "pasazer",
-    displayName: "Anna Kowalska",
-    role: "passenger",
-  },
-  {
-    username: "bileter",
-    password: "bileter",
-    displayName: "Jan Nowak",
-    role: "inspector",
-  },
-];
-
-function readInitialUser(): AuthUser | null {
-  if (typeof sessionStorage === "undefined") return null;
+function readInitialSession(): StoredSession | null {
+  if (typeof sessionStorage === 'undefined') return null;
   const raw = sessionStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as AuthUser;
+    const parsed = JSON.parse(raw) as StoredSession;
     if (
       parsed &&
-      typeof parsed.username === "string" &&
-      typeof parsed.displayName === "string" &&
-      (parsed.role === "passenger" || parsed.role === "inspector")
+      typeof parsed.token === 'string' &&
+      parsed.user &&
+      typeof parsed.user.username === 'string' &&
+      typeof parsed.user.displayName === 'string' &&
+      (parsed.user.role === 'passenger' || parsed.user.role === 'inspector')
     ) {
       return parsed;
     }
@@ -48,44 +39,47 @@ function readInitialUser(): AuthUser | null {
   return null;
 }
 
-@Injectable({ providedIn: "root" })
+@Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly _user = signal<AuthUser | null>(readInitialUser());
-  readonly user = this._user.asReadonly();
-  readonly role = computed(() => this._user()?.role ?? null);
+  private readonly api = inject(ApiService);
 
-  constructor() {
-    effect(() => {
-      const user = this._user();
-      if (typeof sessionStorage === "undefined") return;
-      if (user) {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-      } else {
-        sessionStorage.removeItem(STORAGE_KEY);
-      }
-    });
+  private readonly _session = signal<StoredSession | null>(readInitialSession());
+  readonly user = computed(() => this._session()?.user ?? null);
+  readonly role = computed(() => this._session()?.user.role ?? null);
+
+  token(): string | null {
+    return this._session()?.token ?? null;
   }
 
-  login(username: string, password: string): AuthUser | null {
-    const account = MOCK_ACCOUNTS.find(
-      (a) =>
-        a.username === username.trim().toLowerCase() && a.password === password,
+  login(username: string, password: string): Observable<AuthUser> {
+    return this.api.login(username.trim(), password).pipe(
+      map((res) => {
+        const session: StoredSession = {
+          token: res.token,
+          user: {
+            username: res.username,
+            displayName: res.displayName,
+            role: res.role.toLowerCase() as Role
+          }
+        };
+        return session;
+      }),
+      tap((session) => {
+        this._session.set(session);
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+      }),
+      map((session) => session.user)
     );
-    if (!account) return null;
-    const user: AuthUser = {
-      username: account.username,
-      displayName: account.displayName,
-      role: account.role,
-    };
-    this._user.set(user);
-    return user;
   }
 
   logout(): void {
-    this._user.set(null);
+    this._session.set(null);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
   }
 
   is(role: Role): boolean {
-    return this._user()?.role === role;
+    return this.role() === role;
   }
 }

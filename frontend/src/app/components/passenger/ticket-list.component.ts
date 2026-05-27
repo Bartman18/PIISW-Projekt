@@ -1,7 +1,7 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ApiService } from '../../services/api.service';
+import { apiErrorMessage } from '../../services/api.service';
 import { TicketService } from '../../services/ticket.service';
 import { Ticket } from '../../models/ticket.model';
 import { TicketCardComponent } from './ticket-card.component';
@@ -102,15 +102,18 @@ import { TicketCardComponent } from './ticket-card.component';
     </section>
   `
 })
-export class TicketListComponent {
+export class TicketListComponent implements OnInit {
   readonly tickets = inject(TicketService);
-  private readonly api = inject(ApiService);
 
   readonly validatingId = signal<string | null>(null);
   readonly pendingId = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
   readonly noticeKind = signal<'success' | 'error'>('success');
   vehicleInput = '';
+
+  ngOnInit(): void {
+    this.tickets.loadTickets();
+  }
 
   canActivate(ticket: Ticket): boolean {
     return ticket.status !== 'validated';
@@ -130,10 +133,10 @@ export class TicketListComponent {
     const vehicleId = this.vehicleInput.trim();
     if (!vehicleId) return;
     try {
-      const updated = await firstValueFrom(this.api.validateTicket(ticket.id, vehicleId));
+      const updated = await firstValueFrom(this.tickets.validate(ticket.id, vehicleId));
       this.showNotice('success', `Bilet ${updated.id} skasowany w pojeździe ${updated.vehicleId}.`);
     } catch (err) {
-      this.showNotice('error', err instanceof Error ? err.message : 'Błąd kasowania biletu');
+      this.showNotice('error', apiErrorMessage(err, 'Błąd kasowania biletu'));
     }
     this.cancelValidation();
   }
@@ -141,13 +144,13 @@ export class TicketListComponent {
   async activate(ticket: Ticket): Promise<void> {
     this.pendingId.set(ticket.id);
     try {
-      const updated = await firstValueFrom(this.api.validateTicket(ticket.id));
+      const updated = await firstValueFrom(this.tickets.validate(ticket.id));
       const until = updated.validUntil
         ? new Date(updated.validUntil).toLocaleString('pl-PL')
         : '';
       this.showNotice('success', `Bilet ${updated.id} aktywowany. Ważny do ${until}.`);
     } catch (err) {
-      this.showNotice('error', err instanceof Error ? err.message : 'Błąd aktywacji biletu');
+      this.showNotice('error', apiErrorMessage(err, 'Błąd aktywacji biletu'));
     } finally {
       this.pendingId.set(null);
     }

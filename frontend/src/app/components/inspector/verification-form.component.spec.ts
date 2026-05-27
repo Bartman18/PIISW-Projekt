@@ -1,22 +1,24 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
 import { VerificationFormComponent } from './verification-form.component';
 import { ApiService } from '../../services/api.service';
-import { TicketService } from '../../services/ticket.service';
 import { VerificationResult } from '../../models/ticket.model';
 
 describe('VerificationFormComponent', () => {
   let fixture: ComponentFixture<VerificationFormComponent>;
   let component: VerificationFormComponent;
   let api: ApiService;
-  let tickets: TicketService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [VerificationFormComponent] });
+    TestBed.configureTestingModule({
+      imports: [VerificationFormComponent],
+      providers: [provideHttpClient(), provideHttpClientTesting()]
+    });
     fixture = TestBed.createComponent(VerificationFormComponent);
     component = fixture.componentInstance;
     api = TestBed.inject(ApiService);
-    tickets = TestBed.inject(TicketService);
     fixture.detectChanges();
   });
 
@@ -69,14 +71,6 @@ describe('VerificationFormComponent', () => {
     await component.verify();
     expect(component.result()?.valid).toBeFalse();
     expect(component.result()?.message).toBe('Network down');
-  });
-
-  it('lists owned tickets as clickable demo IDs', () => {
-    const def = tickets.catalog()[0];
-    const ticket = tickets.createFromDefinition(def);
-    fixture.detectChanges();
-    const text = fixture.nativeElement.textContent as string;
-    expect(text).toContain(ticket.id);
   });
 
   describe('canSubmit', () => {

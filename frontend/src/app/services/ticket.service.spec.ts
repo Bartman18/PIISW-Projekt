@@ -1,133 +1,86 @@
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TicketService } from './ticket.service';
-import { TicketDefinition } from '../models/ticket.model';
+import { Ticket, TicketDefinition } from '../models/ticket.model';
+import { API_BASE_URL } from './api.constants';
 
-function findDef(service: TicketService, id: string): TicketDefinition {
-  const def = service.catalog().find((d) => d.id === id);
-  if (!def) throw new Error(`Test setup: missing catalog entry ${id}`);
-  return def;
-}
+const CATALOG_URL = `${API_BASE_URL}/catalog`;
+const TICKETS_URL = `${API_BASE_URL}/passenger/tickets`;
+const WALLET_URL = `${API_BASE_URL}/passenger/wallet`;
+const PURCHASE_URL = `${API_BASE_URL}/passenger/tickets/purchase`;
+
+const SAMPLE_DEF: TicketDefinition = {
+  id: 'def-single-n',
+  name: 'Bilet jednorazowy',
+  price: 4,
+  type: 'jednorazowy',
+  category: 'normalny'
+};
+
+const SAMPLE_TICKET: Ticket = {
+  id: 'TKT-ABC123',
+  definitionId: 'def-single-n',
+  name: 'Bilet jednorazowy',
+  price: 4,
+  type: 'jednorazowy',
+  category: 'normalny',
+  status: 'active',
+  purchaseTime: Date.now()
+};
 
 describe('TicketService', () => {
   let service: TicketService;
+  let httpMock: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({});
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting()]
+    });
     service = TestBed.inject(TicketService);
+    httpMock = TestBed.inject(HttpTestingController);
   });
 
-  describe('catalog', () => {
-    it('exposes both normalny and ulgowy variants for every base ticket', () => {
-      const ids = service.catalog().map((d) => d.id);
-      expect(ids).toContain('def-single-n');
-      expect(ids).toContain('def-single-u');
-    });
+  afterEach(() => httpMock.verify());
 
-    it('halves the price for the ulgowy variant', () => {
-      const normal = findDef(service, 'def-single-n');
-      const reduced = findDef(service, 'def-single-u');
-      expect(normal.price).toBe(4);
-      expect(reduced.price).toBe(2);
-    });
+  it('loadCatalog populates the catalog signal', () => {
+    service.loadCatalog();
+    httpMock.expectOne(CATALOG_URL).flush([SAMPLE_DEF]);
+    expect(service.catalog().map((d) => d.id)).toEqual(['def-single-n']);
   });
 
-  describe('createFromDefinition', () => {
-    it('appends a new active ticket with a generated TKT- id', () => {
-      const def = findDef(service, 'def-single-n');
-      const ticket = service.createFromDefinition(def);
-      expect(ticket.id).toMatch(/^TKT-[A-Z0-9]+$/);
-      expect(ticket.status).toBe('active');
-      expect(ticket.definitionId).toBe(def.id);
-      expect(service.tickets().length).toBe(1);
-      expect(service.tickets()[0].id).toBe(ticket.id);
-    });
-
-    it('keeps every ticket id unique across many purchases', () => {
-      const def = findDef(service, 'def-single-n');
-      const ids = new Set<string>();
-      for (let i = 0; i < 25; i++) ids.add(service.createFromDefinition(def).id);
-      expect(ids.size).toBe(25);
-    });
+  it('loadTickets populates the tickets signal', () => {
+    service.loadTickets();
+    httpMock.expectOne(TICKETS_URL).flush([SAMPLE_TICKET]);
+    expect(service.tickets().length).toBe(1);
   });
 
-  describe('activeTickets', () => {
-    it('returns active and validated tickets', () => {
-      const def = findDef(service, 'def-single-n');
-      const a = service.createFromDefinition(def);
-      const b = service.createFromDefinition(def);
-      service.validate(b.id, 'BUS-1');
-      expect(service.activeTickets().map((t) => t.id)).toEqual(
-        jasmine.arrayWithExactContents([a.id, b.id])
-      );
-    });
+  it('purchase posts the definition and refreshes tickets and wallet', () => {
+    let purchased: Ticket | undefined;
+    service.purchase('def-single-n').subscribe((t) => (purchased = t));
+
+    const purchaseReq = httpMock.expectOne(PURCHASE_URL);
+    expect(purchaseReq.request.method).toBe('POST');
+    expect(purchaseReq.request.body).toEqual({ definitionId: 'def-single-n' });
+    purchaseReq.flush(SAMPLE_TICKET);
+
+    httpMock.expectOne(TICKETS_URL).flush([SAMPLE_TICKET]);
+    httpMock.expectOne(WALLET_URL).flush({ balance: 46 });
+
+    expect(purchased?.id).toBe('TKT-ABC123');
+    expect(service.tickets().length).toBe(1);
   });
 
-  describe('validate – jednorazowy', () => {
-    it('requires a vehicleId, otherwise leaves the ticket active', () => {
-      const def = findDef(service, 'def-single-n');
-      const ticket = service.createFromDefinition(def);
-      const result = service.validate(ticket.id);
-      expect(result).toBeUndefined();
-      expect(service.findById(ticket.id)?.status).toBe('active');
-    });
+  it('validate posts the vehicleId and refreshes tickets', () => {
+    const validated = { ...SAMPLE_TICKET, status: 'validated' as const, vehicleId: 'TRAM-1' };
+    service.validate('TKT-ABC123', 'TRAM-1').subscribe();
 
-    it('marks the ticket validated and stores the vehicleId', () => {
-      const def = findDef(service, 'def-single-n');
-      const ticket = service.createFromDefinition(def);
-      const updated = service.validate(ticket.id, 'TRAM-7');
-      expect(updated?.status).toBe('validated');
-      expect(updated?.vehicleId).toBe('TRAM-7');
-      expect(updated?.validationTime).toBeDefined();
-    });
+    const req = httpMock.expectOne(`${API_BASE_URL}/passenger/tickets/TKT-ABC123/validate`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ vehicleId: 'TRAM-1' });
+    req.flush(validated);
 
-    it('is a no-op when called twice on the same ticket', () => {
-      const def = findDef(service, 'def-single-n');
-      const ticket = service.createFromDefinition(def);
-      service.validate(ticket.id, 'TRAM-7');
-      const again = service.validate(ticket.id, 'TRAM-9');
-      expect(again).toBeUndefined();
-      expect(service.findById(ticket.id)?.vehicleId).toBe('TRAM-7');
-    });
-  });
-
-  describe('validate – czasowy', () => {
-    it('sets validUntil to now + durationMinutes', () => {
-      jasmine.clock().install();
-      const fixedNow = new Date('2026-05-13T10:00:00Z');
-      jasmine.clock().mockDate(fixedNow);
-
-      const def = findDef(service, 'def-time-30m-n');
-      const ticket = service.createFromDefinition(def);
-      const updated = service.validate(ticket.id);
-
-      expect(updated?.status).toBe('validated');
-      expect(updated?.validUntil).toBe(fixedNow.getTime() + 30 * 60_000);
-      expect(updated?.vehicleId).toBeUndefined();
-
-      jasmine.clock().uninstall();
-    });
-  });
-
-  describe('validate – okresowy', () => {
-    it('sets validUntil to now + validityDays', () => {
-      jasmine.clock().install();
-      const fixedNow = new Date('2026-05-13T10:00:00Z');
-      jasmine.clock().mockDate(fixedNow);
-
-      const def = findDef(service, 'def-period-30-n');
-      const ticket = service.createFromDefinition(def);
-      const updated = service.validate(ticket.id);
-
-      expect(updated?.status).toBe('validated');
-      expect(updated?.validUntil).toBe(fixedNow.getTime() + 30 * 24 * 60 * 60_000);
-
-      jasmine.clock().uninstall();
-    });
-  });
-
-  describe('findById', () => {
-    it('returns undefined for an unknown id', () => {
-      expect(service.findById('TKT-NOPE')).toBeUndefined();
-    });
+    httpMock.expectOne(TICKETS_URL).flush([validated]);
+    expect(service.tickets()[0].status).toBe('validated');
   });
 });

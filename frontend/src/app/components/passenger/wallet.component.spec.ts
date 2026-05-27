@@ -1,21 +1,46 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Observable, of, throwError } from 'rxjs';
 import { WalletComponent } from './wallet.component';
 import { WalletService } from '../../services/wallet.service';
-import { PaymentService, PaymentResult } from '../../services/payment.service';
+import { PaymentService } from '../../services/payment.service';
+import { WalletResponse } from '../../services/api.service';
+
+class FakeWalletService {
+  readonly balance = signal(50);
+  readonly refresh = jasmine.createSpy('refresh');
+  readonly topUp = jasmine
+    .createSpy('topUp')
+    .and.returnValue(of({ balance: 70 }) as Observable<WalletResponse>);
+}
+
+class FakePaymentService {
+  readonly loading = signal(false);
+  readonly message = signal('');
+}
 
 describe('WalletComponent', () => {
   let fixture: ComponentFixture<WalletComponent>;
   let component: WalletComponent;
-  let wallet: WalletService;
-  let payment: PaymentService;
+  let wallet: FakeWalletService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [WalletComponent] });
+    wallet = new FakeWalletService();
+    TestBed.configureTestingModule({
+      imports: [WalletComponent],
+      providers: [
+        { provide: WalletService, useValue: wallet },
+        { provide: PaymentService, useValue: new FakePaymentService() }
+      ]
+    });
     fixture = TestBed.createComponent(WalletComponent);
     component = fixture.componentInstance;
-    wallet = TestBed.inject(WalletService);
-    payment = TestBed.inject(PaymentService);
     fixture.detectChanges();
+  });
+
+  it('refreshes the balance on init', () => {
+    expect(wallet.refresh).toHaveBeenCalled();
   });
 
   it('shows the current wallet balance formatted to two decimals', () => {
@@ -24,26 +49,22 @@ describe('WalletComponent', () => {
   });
 
   it('reacts to balance changes from the service', () => {
-    wallet.topUp(15);
+    wallet.balance.set(65);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('65.00');
   });
 
-  it('calls payment.process and then wallet.topUp(20) on top-up click', async () => {
-    const result: PaymentResult = { success: true, transactionId: 'TX-TEST123' };
-    spyOn(payment, 'process').and.resolveTo(result);
-    const topUpSpy = spyOn(wallet, 'topUp').and.callThrough();
-    await component.topUp();
-    expect(payment.process).toHaveBeenCalledOnceWith(20, jasmine.any(String));
-    expect(topUpSpy).toHaveBeenCalledOnceWith(20);
-    expect(component.lastTopUp()).toContain('TX-TEST123');
+  it('tops up via the wallet service and reports success', () => {
+    component.topUp();
+    expect(wallet.topUp).toHaveBeenCalledOnceWith(20);
+    expect(component.lastTopUp()).toContain('Doładowano 20.00 PLN');
   });
 
-  it('does not credit the wallet when payment fails', async () => {
-    spyOn(payment, 'process').and.resolveTo({ success: false, transactionId: 'TX-X' });
-    const topUpSpy = spyOn(wallet, 'topUp');
-    await component.topUp();
-    expect(topUpSpy).not.toHaveBeenCalled();
-    expect(component.lastTopUp()).toBeNull();
+  it('reports a failure message when the top-up errors', () => {
+    wallet.topUp.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 500, error: {} }))
+    );
+    component.topUp();
+    expect(component.lastTopUp()).toBe('Doładowanie nie powiodło się');
   });
 });

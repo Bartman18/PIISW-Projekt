@@ -1,9 +1,40 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Observable, of, throwError } from 'rxjs';
 import { TicketShopComponent } from './ticket-shop.component';
-import { ApiService } from '../../services/api.service';
 import { WalletService } from '../../services/wallet.service';
 import { TicketService } from '../../services/ticket.service';
 import { Ticket, TicketDefinition } from '../../models/ticket.model';
+
+const CATALOG: TicketDefinition[] = [
+  { id: 'def-single-n', name: 'Bilet jednorazowy', price: 4, type: 'jednorazowy', category: 'normalny' },
+  { id: 'def-single-u', name: 'Bilet jednorazowy', price: 2, type: 'jednorazowy', category: 'ulgowy' }
+];
+
+const FAKE_TICKET: Ticket = {
+  id: 'TKT-FAKE1234',
+  definitionId: 'def-single-n',
+  name: 'Bilet jednorazowy',
+  price: 4,
+  type: 'jednorazowy',
+  category: 'normalny',
+  status: 'active',
+  purchaseTime: Date.now()
+};
+
+class FakeTicketService {
+  readonly catalog = signal<TicketDefinition[]>(CATALOG);
+  readonly loadCatalog = jasmine.createSpy('loadCatalog');
+  readonly purchase = jasmine
+    .createSpy('purchase')
+    .and.returnValue(of(FAKE_TICKET) as Observable<Ticket>);
+}
+
+class FakeWalletService {
+  readonly refresh = jasmine.createSpy('refresh');
+  readonly canAfford = jasmine.createSpy('canAfford').and.returnValue(true);
+}
 
 function buyButtons(fixture: ComponentFixture<TicketShopComponent>): HTMLButtonElement[] {
   return Array.from(fixture.nativeElement.querySelectorAll('article button'));
@@ -12,17 +43,26 @@ function buyButtons(fixture: ComponentFixture<TicketShopComponent>): HTMLButtonE
 describe('TicketShopComponent', () => {
   let fixture: ComponentFixture<TicketShopComponent>;
   let component: TicketShopComponent;
-  let api: ApiService;
-  let wallet: WalletService;
-  let tickets: TicketService;
+  let tickets: FakeTicketService;
+  let wallet: FakeWalletService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [TicketShopComponent] });
+    tickets = new FakeTicketService();
+    wallet = new FakeWalletService();
+    TestBed.configureTestingModule({
+      imports: [TicketShopComponent],
+      providers: [
+        { provide: TicketService, useValue: tickets },
+        { provide: WalletService, useValue: wallet }
+      ]
+    });
     fixture = TestBed.createComponent(TicketShopComponent);
     component = fixture.componentInstance;
-    api = TestBed.inject(ApiService);
-    wallet = TestBed.inject(WalletService);
-    tickets = TestBed.inject(TicketService);
+  });
+
+  it('loads the catalog on init', () => {
+    fixture.detectChanges();
+    expect(tickets.loadCatalog).toHaveBeenCalled();
   });
 
   it('renders only normalny tickets by default', () => {
@@ -40,7 +80,7 @@ describe('TicketShopComponent', () => {
   });
 
   it('disables the buy button and shows the empty-wallet label when broke', () => {
-    spyOn(wallet, 'canAfford').and.returnValue(false);
+    wallet.canAfford.and.returnValue(false);
     fixture.detectChanges();
     const buttons = buyButtons(fixture);
     expect(buttons.length).toBeGreaterThan(0);
@@ -49,7 +89,7 @@ describe('TicketShopComponent', () => {
   });
 
   it('enables the buy button when the wallet can afford the ticket', () => {
-    spyOn(wallet, 'canAfford').and.returnValue(true);
+    wallet.canAfford.and.returnValue(true);
     fixture.detectChanges();
     const buttons = buyButtons(fixture);
     expect(buttons.every((b) => !b.disabled)).toBeTrue();
@@ -57,26 +97,16 @@ describe('TicketShopComponent', () => {
   });
 
   it('shows a success notice with the purchased ticket id', async () => {
-    const def: TicketDefinition = tickets.catalog()[0];
-    const fakeTicket: Ticket = {
-      id: 'TKT-FAKE1234',
-      definitionId: def.id,
-      name: def.name,
-      price: def.price,
-      type: def.type,
-      category: def.category,
-      status: 'active',
-      purchaseTime: Date.now()
-    };
-    spyOn(api, 'purchaseTicket').and.resolveTo(fakeTicket);
-    await component.buy(def);
+    await component.buy(CATALOG[0]);
     expect(component.noticeKind()).toBe('success');
     expect(component.notice()).toContain('TKT-FAKE1234');
   });
 
   it('shows an error notice when the purchase fails', async () => {
-    spyOn(api, 'purchaseTicket').and.rejectWith(new Error('Niewystarczające saldo'));
-    await component.buy(tickets.catalog()[0]);
+    tickets.purchase.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 422, error: { message: 'Niewystarczające saldo' } }))
+    );
+    await component.buy(CATALOG[0]);
     expect(component.noticeKind()).toBe('error');
     expect(component.notice()).toBe('Niewystarczające saldo');
   });

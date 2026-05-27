@@ -1,8 +1,11 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { LoginComponent } from './login.component';
-import { AuthService } from '../../services/auth.service';
+import { API_BASE_URL } from '../../services/api.constants';
+
+const LOGIN_URL = `${API_BASE_URL}/auth/login`;
 
 function setInput(fixture: ComponentFixture<LoginComponent>, name: string, value: string): void {
   const input: HTMLInputElement = fixture.nativeElement.querySelector(`input[name="${name}"]`);
@@ -14,22 +17,26 @@ describe('LoginComponent', () => {
   let fixture: ComponentFixture<LoginComponent>;
   let component: LoginComponent;
   let navigateSpy: jasmine.Spy;
+  let httpMock: HttpTestingController;
 
   beforeEach(async () => {
     sessionStorage.clear();
     TestBed.configureTestingModule({
       imports: [LoginComponent],
-      providers: [provideRouter([])]
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()]
     });
     fixture = TestBed.createComponent(LoginComponent);
     component = fixture.componentInstance;
     navigateSpy = spyOn(TestBed.inject(Router), 'navigateByUrl');
+    httpMock = TestBed.inject(HttpTestingController);
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
   });
 
-  it('renders the login form with the mock-accounts hint', () => {
+  afterEach(() => httpMock.verify());
+
+  it('renders the login form with the test-accounts hint', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Logowanie');
     expect(text).toContain('Konta testowe');
@@ -56,6 +63,11 @@ describe('LoginComponent', () => {
     component.username = 'pasazer';
     component.password = 'pasazer';
     component.submit();
+
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ token: 'jwt', username: 'pasazer', displayName: 'Anna Kowalska', role: 'PASSENGER' });
+
     expect(navigateSpy).toHaveBeenCalledWith('/passenger');
     expect(component.error()).toBeNull();
   });
@@ -64,6 +76,11 @@ describe('LoginComponent', () => {
     component.username = 'bileter';
     component.password = 'bileter';
     component.submit();
+
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ token: 'jwt', username: 'bileter', displayName: 'Jan Nowak', role: 'INSPECTOR' });
+
     expect(navigateSpy).toHaveBeenCalledWith('/inspector');
   });
 
@@ -71,18 +88,14 @@ describe('LoginComponent', () => {
     component.username = 'pasazer';
     component.password = 'wrong';
     component.submit();
+
+    httpMock
+      .expectOne(LOGIN_URL)
+      .flush({ message: 'Błędny login lub hasło' }, { status: 401, statusText: 'Unauthorized' });
+
     expect(navigateSpy).not.toHaveBeenCalled();
     expect(component.error()).toBe('Nieprawidłowy login lub hasło.');
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Nieprawidłowy login lub hasło.');
-  });
-
-  it('uses AuthService.login under the hood', () => {
-    const auth = TestBed.inject(AuthService);
-    const loginSpy = spyOn(auth, 'login').and.callThrough();
-    component.username = 'pasazer';
-    component.password = 'pasazer';
-    component.submit();
-    expect(loginSpy).toHaveBeenCalledWith('pasazer', 'pasazer');
   });
 });

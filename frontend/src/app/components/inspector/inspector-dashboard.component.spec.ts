@@ -1,11 +1,16 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { InspectorDashboardComponent } from './inspector-dashboard.component';
 
 describe('InspectorDashboardComponent', () => {
   let fixture: ComponentFixture<InspectorDashboardComponent>;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [InspectorDashboardComponent] });
+    TestBed.configureTestingModule({
+      imports: [InspectorDashboardComponent],
+      providers: [provideHttpClient(), provideHttpClientTesting()]
+    });
     fixture = TestBed.createComponent(InspectorDashboardComponent);
     fixture.detectChanges();
   });
